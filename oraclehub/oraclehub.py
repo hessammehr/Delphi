@@ -1,13 +1,14 @@
 from __future__ import annotations
-from argparse import Namespace
 
 import inspect
+import pickle
+from argparse import Namespace
+from contextlib import contextmanager
 from hashlib import sha256
 from pathlib import Path
-import pickle
-
-from contextlib import contextmanager
 from typing import final
+
+import numpy as np
 import pandas as pd
 from jax import numpy as jnp
 from jax.random import PRNGKey
@@ -91,16 +92,20 @@ class OracleHub:
             with open(py_file, "w") as f:
                 f.write(models[model_hash]["source"])
 
-    def run(self, model: Model | str, data, sample_params=None):
+    def run(self, predictor, data, observables=None, sample_params=None):
         sample_params = sample_params or {}
-        if isinstance(model, str):
-            model = self[model]
-        return self.sample(model.predict, data, **sample_params)
+
+        def model_fn(data, observables=None):
+            for var, dist in predictor(data).items():
+                obs = observables and observables.get(var, None)
+                sample(var, dist, obs=obs)
+
+        return self.sample(model_fn, data, observables, **sample_params)
 
     def sample(
         self,
-        model_fn: function,
-        data,
+        model_fn,
+        *args,
         nuts_params=None,
         mcmc_params=None,
     ):
@@ -109,7 +114,7 @@ class OracleHub:
 
         nuts = NUTS(model_fn, **nuts_params)
         mcmc = MCMC(nuts, num_samples=1000, num_warmup=1000, **mcmc_params)
-        mcmc.run(PRNGKey(0), data=data)
+        mcmc.run(PRNGKey(0), *args)
         return mcmc
 
     def compare(
@@ -119,10 +124,22 @@ class OracleHub:
         alpha=1.0,
         sample_params=None,
     ):
+        mix = self.mix(model_hashes, alpha=alpha)
+        models = {model_hash: self[model_hash] for model_hash in model_hashes}
+        observables = [m.post_process(data) for m in models.values()]
+        
+        # TODO: make sure observables are the same for all models
+        return self.run(mix, data, observables=observables[0], sample_params=sample_params)
+
+    def mix(
+        self,
+        model_hashes: list[str],
+        alpha=1.0,
+    ):
         N_models = len(model_hashes)
         models = {model_hash: self[model_hash] for model_hash in model_hashes}
 
-        def numpyro_model(data):
+        def predictor_fn(data):
             weight_dist = dist.Dirichlet(jnp.ones(N_models) * alpha)
             mixing_dist = dist.Categorical(sample("probs", weight_dist))
 
@@ -138,16 +155,12 @@ class OracleHub:
                 for var_name in observed_var_names
             }
 
-            mixtures = {
+            return {
                 var_name: dist.Mixture(mixing_dist, preds)
                 for var_name, preds in var_predictors.items()
             }
 
-            for var_name, mix_pred in mixtures.items():
-                sample(var_name, mix_pred, obs=data[var_name])
-
-        sample_params = sample_params or {}
-        self.sample(numpyro_model, data, **sample_params)
+        return predictor_fn
 
     def __getitem__(self, model_hash) -> Model:
         if self._meta is None:
