@@ -4,6 +4,7 @@ import inspect
 import pickle
 from argparse import Namespace
 from contextlib import contextmanager
+from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
 from typing import final
@@ -52,21 +53,23 @@ class OracleHub:
         model_hash = sha256(source.encode())
         model_hash.update(model_name.encode())
         model_hash = model_hash.hexdigest()[:8]
+        model_id = model_name + '-' + model_hash
 
-        self.db[model_hash] = {
+        self.db[model_id] = {
             "model": model,
             "source": source,
             "name": model.__name__,
+            "timestamp": datetime.now()
         }
 
         self.write()
-        return model_hash
+        return model_id
 
     def load(self):
         with self.db_file.open("rb") as f:
             db = pickle.load(f)
-        for model_hash in db:
-            obj = db[model_hash]
+        for model_id in db:
+            obj = db[model_id]
             namespace = {}
             exec(obj["source"], namespace)
             obj["model"] = namespace[obj["name"]]
@@ -75,22 +78,22 @@ class OracleHub:
     def write(self):
         # remove model object as it's tricky to serialize
         db = {
-            model_hash: {k: v for k, v in model_info.items() if k != "model"}
-            for model_hash, model_info in self.db.items()
+            model_id: {k: v for k, v in model_info.items() if k != "model"}
+            for model_id, model_info in self.db.items()
         }
         with self.db_file.open("wb") as f:
             pickle.dump(db, f)
 
-    def dump(self, path: Path = None, model_hash=None):
+    def dump(self, path: Path = None, model_id=None):
         path = path or self.db_file.parent
-        if model_hash:
-            models = {model_hash: self.db[model_hash]}
+        if model_id:
+            models = {model_id: self.db[model_id]}
         else:
             models = self.db
-        for model_hash in models:
-            py_file = (path / model_hash).with_suffix(".py")
+        for model_id in models:
+            py_file = (path / model_id).with_suffix(".py")
             with open(py_file, "w") as f:
-                f.write(models[model_hash]["source"])
+                f.write(models[model_id]["source"])
 
     def run(self, predictor, data, observables=None, sample_params=None):
         sample_params = sample_params or {}
@@ -119,13 +122,13 @@ class OracleHub:
 
     def compare(
         self,
-        model_hashes: list[str],
+        model_ids: list[str],
         data,
         alpha=1.0,
         sample_params=None,
     ):
-        mix = self.mix(model_hashes, alpha=alpha)
-        models = {model_hash: self[model_hash] for model_hash in model_hashes}
+        mix = self.mix(model_ids, alpha=alpha)
+        models = {model_id: self[model_id] for model_id in model_ids}
         observables = [m.post_process(data) for m in models.values()]
         
         # TODO: make sure observables are the same for all models
@@ -133,19 +136,19 @@ class OracleHub:
 
     def mix(
         self,
-        model_hashes: list[str],
+        model_ids: list[str],
         alpha=1.0,
     ):
-        N_models = len(model_hashes)
-        models = {model_hash: self[model_hash] for model_hash in model_hashes}
+        N_models = len(model_ids)
+        models = {model_id: self[model_id] for model_id in model_ids}
 
         def predictor_fn(data):
             weight_dist = dist.Dirichlet(jnp.ones(N_models) * alpha)
             mixing_dist = dist.Categorical(sample("probs", weight_dist))
 
             predictors = []
-            for model_hash, model in models.items():
-                with scope(prefix=model_hash, divider="."):
+            for model_id, model in models.items():
+                with scope(prefix=model_id, divider="."):
                     predictors.append(model.predict(data))
 
             observed_var_names = list(predictors[0])
@@ -162,7 +165,7 @@ class OracleHub:
 
         return predictor_fn
 
-    def __getitem__(self, model_hash) -> Model:
+    def __getitem__(self, model_id) -> Model:
         if self._meta is None:
             raise Exception("Metadata not loaded")
-        return self.db[model_hash]["model"](self._meta)
+        return self.db[model_id]["model"](self._meta)
