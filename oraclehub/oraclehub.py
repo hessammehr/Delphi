@@ -97,7 +97,17 @@ class OracleHub:
         def model_fn(data, observables=None):
             for var, dist in predictor(data).items():
                 obs = observables and observables.get(var, None)
-                sample(var, dist, obs=obs)
+                if obs is not None:
+                    # impute missing values
+                    is_nan = np.isnan(obs)
+                    nan_idx = np.nonzero(is_nan)[0]
+                    impute_samples = sample(var, dist)
+                    if nan_idx.size:
+                        obs = jnp.asarray(obs).at[nan_idx].set(impute_samples[nan_idx])
+                    sample(f'{var}_obs', dist.mask(~is_nan), obs=obs)
+                else:
+                    sample(var, dist)
+
 
         return self.sample(model_fn, data, observables, **sample_params)
 
