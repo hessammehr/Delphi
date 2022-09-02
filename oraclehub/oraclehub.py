@@ -1,13 +1,13 @@
 from __future__ import annotations
+from importlib import reload
 
 import inspect
-import pickle
-from argparse import Namespace
 from contextlib import contextmanager
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
-from typing import final
+import shutil
+import tempfile
 
 import numpy as np
 import pandas as pd
@@ -17,21 +17,33 @@ from numpyro import distributions as dist
 from numpyro import sample
 from numpyro.handlers import scope
 from numpyro.infer import MCMC, NUTS
+from oraclehub import models
 
 from oraclehub.model import Model
 
 
 class OracleHub:
-    def __init__(self, db_file=None):
+    def __init__(self):
         self.db = {}
         self._meta = None
-        if db_file:
-            self.db_file = Path(db_file)
-        else:
-            self.db_file = Path(__file__).with_name("oracle.db")
+        self.db_dir = Path(__file__).with_name("models")
+        self._build_init()
 
-        if self.db_file.exists():
-            self.load()
+    def _build_init(self):
+        init_file = self.db_dir / "__init__.py"
+        import_lines = ['db = {}\n']
+        db_lines = []
+        for path in self.db_dir.iterdir():
+            if path.is_dir() and not path.name.startswith('_'):
+                import_lines.append(f"from . import {path.name}\n")
+                db_lines.append(f"db['{path.name}'] = {path.name}.model\n")
+
+        with init_file.open("w") as f:
+            f.writelines(import_lines)
+            f.writelines(db_lines)
+        
+        reload(models)
+        self.db = models.db
 
     @contextmanager
     def with_meta(self, meta: dict):
@@ -53,47 +65,26 @@ class OracleHub:
         model_hash = sha256(source.encode())
         model_hash.update(model_name.encode())
         model_hash = model_hash.hexdigest()[:8]
-        model_id = model_name + '-' + model_hash
 
-        self.db[model_id] = {
-            "model": model,
-            "source": source,
-            "name": model.__name__,
-            "timestamp": datetime.now()
-        }
+        model_id = model_name + "_" + model_hash
 
-        self.write()
+        if hasattr(models, model_id):
+            return model_id
+
+        model_dir = self.db_dir / f"{model_id}"
+        model_dir.mkdir()
+
+        with (model_dir / "code.py").open("w") as f:
+            f.write(source)
+        with (model_dir / "__init__.py").open("w") as f:
+            f.writelines([
+                f'from .code import {model_name} as model\n',
+                f"timestamp = '{datetime.now()}'\n",
+            ])
+
+        self._build_init()
         return model_id
-
-    def load(self):
-        with self.db_file.open("rb") as f:
-            db = pickle.load(f)
-        for model_id in db:
-            obj = db[model_id]
-            namespace = {}
-            exec(obj["source"], namespace)
-            obj["model"] = namespace[obj["name"]]
-        self.db = db
-
-    def write(self):
-        # remove model object as it's tricky to serialize
-        db = {
-            model_id: {k: v for k, v in model_info.items() if k != "model"}
-            for model_id, model_info in self.db.items()
-        }
-        with self.db_file.open("wb") as f:
-            pickle.dump(db, f)
-
-    def dump(self, path: Path = None, model_id=None):
-        path = path or self.db_file.parent
-        if model_id:
-            models = {model_id: self.db[model_id]}
-        else:
-            models = self.db
-        for model_id in models:
-            py_file = (path / model_id).with_suffix(".py")
-            with open(py_file, "w") as f:
-                f.write(models[model_id]["source"])
+    
 
     def run(self, predictor, data, observables=None, sample_params=None):
         sample_params = sample_params or {}
@@ -168,4 +159,4 @@ class OracleHub:
     def __getitem__(self, model_id) -> Model:
         if self._meta is None:
             raise Exception("Metadata not loaded")
-        return self.db[model_id]["model"](self._meta)
+        return self.db[model_id](self._meta)
