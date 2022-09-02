@@ -85,6 +85,11 @@ class OracleHub:
         self._build_init()
         return model_id
     
+    def edit(self, model_id):
+        scratch_dir = self.db_dir.with_name('scratch')
+        _, scratch_file = tempfile.mkstemp(suffix='.py', prefix=model_id + '_', dir=scratch_dir)
+        shutil.copy(self.db_dir / model_id / 'code.py', scratch_file)
+        return scratch_file
 
     def run(self, predictor, data, observables=None, sample_params=None):
         sample_params = sample_params or {}
