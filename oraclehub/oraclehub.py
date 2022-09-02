@@ -109,10 +109,15 @@ class OracleHub:
         mcmc_params=None,
     ):
         nuts_params = nuts_params or {}
-        mcmc_params = mcmc_params or {}
+        mcmc_params = {
+            'num_samples': 1000,
+            'num_warmup': 1000,
+            **(mcmc_params or {})
+        }
 
         nuts = NUTS(model_fn, **nuts_params)
-        mcmc = MCMC(nuts, num_samples=1000, num_warmup=1000, **mcmc_params)
+        mcmc = MCMC(nuts, **mcmc_params)
+        
         mcmc.run(PRNGKey(0), *args)
         return mcmc
 
