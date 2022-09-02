@@ -31,17 +31,17 @@ class OracleHub:
 
     def _build_init(self):
         init_file = self.db_dir / "__init__.py"
-        import_lines = ['db = {}\n']
+        import_lines = ["db = {}\n"]
         db_lines = []
         for path in self.db_dir.iterdir():
-            if path.is_dir() and not path.name.startswith('_'):
+            if path.is_dir() and not path.name.startswith("_"):
                 import_lines.append(f"from . import {path.name}\n")
                 db_lines.append(f"db['{path.name}'] = {path.name}.model\n")
 
         with init_file.open("w") as f:
             f.writelines(import_lines)
             f.writelines(db_lines)
-        
+
         reload(models)
         self.db = models.db
 
@@ -77,18 +77,22 @@ class OracleHub:
         with (model_dir / "code.py").open("w") as f:
             f.write(source)
         with (model_dir / "__init__.py").open("w") as f:
-            f.writelines([
-                f'from .code import {model_name} as model\n',
-                f"timestamp = '{datetime.now()}'\n",
-            ])
+            f.writelines(
+                [
+                    f"from .code import {model_name} as model\n",
+                    f"timestamp = '{datetime.now()}'\n",
+                ]
+            )
 
         self._build_init()
         return model_id
-    
+
     def edit(self, model_id):
-        scratch_dir = self.db_dir.with_name('scratch')
-        _, scratch_file = tempfile.mkstemp(suffix='.py', prefix=model_id + '_', dir=scratch_dir)
-        shutil.copy(self.db_dir / model_id / 'code.py', scratch_file)
+        scratch_dir = self.db_dir.with_name("scratch")
+        _, scratch_file = tempfile.mkstemp(
+            suffix=".py", prefix=model_id + "_", dir=scratch_dir
+        )
+        shutil.copy(self.db_dir / model_id / "code.py", scratch_file)
         return scratch_file
 
     def run(self, predictor, data, observables=None, sample_params=None):
@@ -104,10 +108,9 @@ class OracleHub:
                     impute_samples = sample(var, dist)
                     if nan_idx.size:
                         obs = jnp.asarray(obs).at[nan_idx].set(impute_samples[nan_idx])
-                    sample(f'{var}_obs', dist.mask(~is_nan), obs=obs)
+                    sample(f"{var}_obs", dist.mask(~is_nan), obs=obs)
                 else:
                     sample(var, dist)
-
 
         return self.sample(model_fn, data, observables, **sample_params)
 
@@ -119,15 +122,11 @@ class OracleHub:
         mcmc_params=None,
     ):
         nuts_params = nuts_params or {}
-        mcmc_params = {
-            'num_samples': 1000,
-            'num_warmup': 1000,
-            **(mcmc_params or {})
-        }
+        mcmc_params = {"num_samples": 1000, "num_warmup": 1000, **(mcmc_params or {})}
 
         nuts = NUTS(model_fn, **nuts_params)
         mcmc = MCMC(nuts, **mcmc_params)
-        
+
         mcmc.run(PRNGKey(0), *args)
         return mcmc
 
@@ -141,9 +140,11 @@ class OracleHub:
         mix = self.mix(model_ids, alpha=alpha)
         models = {model_id: self[model_id] for model_id in model_ids}
         observables = [m.post_process(data) for m in models.values()]
-        
+
         # TODO: make sure observables are the same for all models
-        return self.run(mix, data, observables=observables[0], sample_params=sample_params)
+        return self.run(
+            mix, data, observables=observables[0], sample_params=sample_params
+        )
 
     def mix(
         self,
