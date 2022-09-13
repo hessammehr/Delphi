@@ -20,12 +20,12 @@ from numpyro import distributions as dist
 from numpyro import sample
 from numpyro.handlers import scope
 from numpyro.infer import MCMC, NUTS
-from oraclehub import models
+from delphi import models
 
-from oraclehub.model import Model
+from delphi.model import Model
 
 
-class OracleHub:
+class Delphi:
     def __init__(self):
         self.db = {}
         self._meta = None

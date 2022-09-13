@@ -1,6 +1,6 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="oraclehub",
+    name="delphi",
     packages=find_packages(),
 )
