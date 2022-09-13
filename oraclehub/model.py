@@ -21,5 +21,5 @@ class Model:
     def predict(self, experiments) -> dict[str, dist.Distribution]:
         pass
 
-    def post_process(self, data: pd.DataFrame) -> dict[str, np.ndarray]:
+    def observables(self, data: pd.DataFrame) -> dict[str, np.ndarray]:
         pass

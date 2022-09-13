@@ -1,10 +1,13 @@
 from __future__ import annotations
 from importlib import reload
+import importlib
 
 import inspect
 from contextlib import contextmanager
 from datetime import datetime
 from hashlib import sha256
+import logging
+import os
 from pathlib import Path
 import shutil
 import tempfile
@@ -42,7 +45,8 @@ class OracleHub:
             f.writelines(import_lines)
             f.writelines(db_lines)
 
-        reload(models)
+        global models
+        models = reload(models)
         self.db = models.db
 
     @contextmanager
@@ -53,8 +57,14 @@ class OracleHub:
         finally:
             self._meta = None
 
-    def submit(self, model: type[Model]):
+    def submit(self, model: type[Model], delete_file=False):
         assert issubclass(model, Model)
+        module = inspect.getmodule(model)
+        try:
+            module = importlib.reload(module)
+            model = getattr(module, model.__name__)
+        except ModuleNotFoundError:
+            logging.warning('Module reload failed, using current definition.')
         model_name = model.__name__
         source_file = inspect.getsourcefile(model)
         if source_file is None:
@@ -67,6 +77,9 @@ class OracleHub:
         model_hash = model_hash.hexdigest()[:8]
 
         model_id = model_name + "_" + model_hash
+
+        if delete_file and source_file:
+            os.remove(source_file)
 
         if hasattr(models, model_id):
             return model_id
@@ -139,7 +152,7 @@ class OracleHub:
     ):
         mix = self.mix(model_ids, alpha=alpha)
         models = {model_id: self[model_id] for model_id in model_ids}
-        observables = [m.post_process(data) for m in models.values()]
+        observables = [m.observables(data) for m in models.values()]
 
         # TODO: make sure observables are the same for all models
         return self.run(
