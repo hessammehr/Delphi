@@ -100,8 +100,9 @@ class Delphi:
         self._build_init()
         return model_id
 
-    def edit(self, model_id):
-        scratch_dir = self.db_dir.with_name("scratch")
+    def edit(self, model_id, scratch_dir=None):
+        if scratch_dir is None:
+            scratch_dir = "./scratch"
         _, scratch_file = tempfile.mkstemp(
             suffix=".py", prefix=model_id + "_", dir=scratch_dir
         )
