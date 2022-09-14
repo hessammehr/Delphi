@@ -28,7 +28,6 @@ from delphi.model import Model
 class Delphi:
     def __init__(self):
         self.db = {}
-        self._meta = None
         self.db_dir = Path(__file__).with_name("models")
         self._build_init()
 
@@ -48,14 +47,6 @@ class Delphi:
         global models
         models = reload(models)
         self.db = models.db
-
-    @contextmanager
-    def with_meta(self, meta: dict):
-        try:
-            self._meta = meta
-            yield self
-        finally:
-            self._meta = None
 
     def submit(self, model: type[Model], delete_file=False):
         assert issubclass(model, Model)
@@ -191,7 +182,5 @@ class Delphi:
 
         return predictor_fn
 
-    def __getitem__(self, model_id) -> Model:
-        if self._meta is None:
-            raise Exception("Metadata not loaded")
-        return self.db[model_id](self._meta)
+    def __getitem__(self, model_id) -> type[Model]:
+        return self.db[model_id]
